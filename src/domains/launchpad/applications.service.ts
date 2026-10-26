@@ -11,13 +11,11 @@ import { ConfigService } from "@nestjs/config";
 import { ErrorCode } from "@neko-protocol/api-contracts";
 import { SupabaseService } from "@core/supabase/supabase.service";
 import { AccountsService } from "./accounts.service";
-import {
-  scoreApplicationSimilarity,
-  type ApplicationSimilarityFields,
-} from "./application-similarity";
+import type { ApplicationSimilarityFields } from "./application-similarity";
 import { AssistantService } from "./assistant/assistant.service";
 import type { CreateApplicationDto } from "./dto/create-application.dto";
 import type { DecideApplicationDto } from "./dto/decide-application.dto";
+import { PRECEDENT_COLUMNS, PrecedentsService } from "./precedents.service";
 import {
   LaunchpadErrorCode,
   toApplicationView,
@@ -42,28 +40,6 @@ const REVIEWABLE: ReadonlySet<ApplicationStatus> = new Set([
   "changes_requested",
 ]);
 
-const SIMILAR_CASE_COLUMNS = [
-  "id",
-  "asset_name",
-  "asset_type",
-  "issuer_country",
-  "offering_type",
-  "target_amount",
-  "currency",
-  "status",
-  "review_note",
-  "reviewed_at",
-  "investor_countries",
-  "accepts_us_investors",
-  "uses_mass_marketing",
-].join(",");
-
-type SimilarCaseRow = Omit<
-  SimilarApplicationCase,
-  "target_amount" | "score" | "matched"
-> &
-  ApplicationSimilarityFields;
-
 @Injectable()
 export class ApplicationsService {
   private readonly logger = new Logger(ApplicationsService.name);
@@ -72,7 +48,8 @@ export class ApplicationsService {
     private readonly supabase: SupabaseService,
     private readonly accounts: AccountsService,
     private readonly assistant: AssistantService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly precedents: PrecedentsService
   ) {}
 
   /** Demo only: lets the issuer approve their own application after submitting. */
@@ -260,7 +237,7 @@ export class ApplicationsService {
   ): Promise<SimilarApplicationsResponse> {
     const { data: target, error: targetError } = await this.supabase.client
       .from("launchpad_applications")
-      .select(SIMILAR_CASE_COLUMNS)
+      .select(PRECEDENT_COLUMNS)
       .eq("id", id)
       .maybeSingle();
     if (targetError)
@@ -271,50 +248,26 @@ export class ApplicationsService {
       });
     }
 
-    let cases: SimilarApplicationCase[] = [];
-    // Page through all decisions so Supabase's row cap cannot hide better matches.
-    const pageSize = 500;
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await this.supabase.client
-        .from("launchpad_applications")
-        .select(SIMILAR_CASE_COLUMNS)
-        .in("status", ["approved", "rejected", "changes_requested"])
-        .neq("id", id)
-        .order("id", { ascending: true })
-        .range(offset, offset + pageSize - 1);
-      if (error) throw this.dbError("application_similar_cases", error);
-
-      const rows = (data ?? []) as unknown as SimilarCaseRow[];
-      for (const row of rows) {
-        const similarity = scoreApplicationSimilarity(
-          target as unknown as ApplicationSimilarityFields,
-          row
-        );
-        if (similarity.score === 0) continue;
-        cases.push({
-          id: row.id,
-          asset_name: row.asset_name,
-          asset_type: row.asset_type,
-          issuer_country: row.issuer_country,
-          offering_type: row.offering_type,
-          target_amount: Number(row.target_amount),
-          currency: row.currency,
-          status: row.status,
-          review_note: row.review_note,
-          reviewed_at: row.reviewed_at,
-          ...similarity,
-        });
-      }
-      cases = cases
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            (b.reviewed_at ?? "").localeCompare(a.reviewed_at ?? "") ||
-            a.id.localeCompare(b.id)
-        )
-        .slice(0, limit);
-      if (rows.length < pageSize) break;
-    }
+    const found = await this.precedents.search(
+      target as unknown as ApplicationSimilarityFields,
+      { excludeId: id, limit }
+    );
+    const cases: SimilarApplicationCase[] = found.map(
+      ({ row, score, matched }) => ({
+        id: row.id,
+        asset_name: row.asset_name,
+        asset_type: row.asset_type,
+        issuer_country: row.issuer_country,
+        offering_type: row.offering_type,
+        target_amount: Number(row.target_amount),
+        currency: row.currency,
+        status: row.status,
+        review_note: row.review_note,
+        reviewed_at: row.reviewed_at,
+        score,
+        matched,
+      })
+    );
 
     const summary = { approved: 0, rejected: 0, changes_requested: 0 };
     for (const item of cases) summary[item.status] += 1;

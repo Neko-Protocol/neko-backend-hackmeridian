@@ -19,7 +19,11 @@ import {
   assistantFileType,
   type TranscriptTurn,
 } from "./assistant-storage.service";
+import { knownSimilarityFields } from "../application-similarity";
+import { PrecedentsService } from "../precedents.service";
 import {
+  PRECEDENTS_TOOL,
+  PRECEDENTS_TOOL_DEF,
   PROPOSE_TOOL,
   PROPOSE_TOOL_DEF,
   SUMMARY_PROMPT,
@@ -48,7 +52,8 @@ export class AssistantService {
     private readonly config: ConfigService,
     private readonly accounts: AccountsService,
     private readonly storage: AssistantStorageService,
-    private readonly rag: RagClient
+    private readonly rag: RagClient,
+    private readonly precedents: PrecedentsService
   ) {}
 
   private get model(): string {
@@ -160,7 +165,7 @@ export class AssistantService {
     return blocks;
   }
 
-  /** Streams the reply as server-sent events: text, tool, proposal, break, error, done. */
+  /** Streams the reply as server-sent events: notice, text, tool, proposal, break, error, done. */
   async streamChat(
     accessToken: string,
     dto: AssistantChatDto,
@@ -186,6 +191,9 @@ export class AssistantService {
       );
     }
 
+    const ragTools = await this.rag.tools();
+    const kbAvailable = ragTools.length > 0;
+
     // Documents on the first turn, live form context on the last: keeps the prefix cacheable.
     const messages: Anthropic.Beta.BetaMessageParam[] = turns.map((turn, i) => {
       if (turn.role === "assistant")
@@ -196,12 +204,17 @@ export class AssistantService {
       if (i === turns.length - 1) {
         content.push({
           type: "text",
-          text: formContext(dto.form, activeField),
+          text: formContext(dto.form, activeField, { kbAvailable }),
         });
       }
       return { role: "user", content };
     });
-    const tools = [PROPOSE_TOOL_DEF, ...(await this.rag.tools())];
+    const tools = [PROPOSE_TOOL_DEF, PRECEDENTS_TOOL_DEF, ...ragTools];
+    const trace = {
+      started: Date.now(),
+      tools: [] as string[],
+      precedentRefs: [] as string[],
+    };
 
     const abort = new AbortController();
     res.on("close", () => abort.abort());
@@ -218,6 +231,14 @@ export class AssistantService {
 
     let replyText = "";
     const proposals: Proposal[] = [];
+    if (!kbAvailable) {
+      send({
+        type: "notice",
+        code: "KB_UNAVAILABLE",
+        message:
+          "The legal knowledge base is not reachable right now, so legal points in this reply are not verified against the law.",
+      });
+    }
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const stream = client.beta.messages.stream(
@@ -289,6 +310,11 @@ export class AssistantService {
                     "Shown to the issuer with Apply buttons. They decide whether to apply each value.",
                 };
               }
+              trace.tools.push(use.name);
+              if (use.name === PRECEDENTS_TOOL) {
+                send({ type: "tool", label: toolLabel(use.name, use.input) });
+                return this.precedentsResult(use.id, dto.form, trace);
+              }
               if (use.name.startsWith(RAG_PREFIX)) {
                 send({ type: "tool", label: toolLabel(use.name, use.input) });
                 const input =
@@ -334,6 +360,17 @@ export class AssistantService {
       }
     } finally {
       res.end();
+      // Trace without form values or text: which tools ran and what they returned.
+      this.logger.log({
+        event: "launchpad_assistant_turn",
+        session: dto.session_id,
+        model: this.model,
+        kb_available: kbAvailable,
+        tools: trace.tools,
+        precedent_refs: trace.precedentRefs,
+        proposals: proposals.length,
+        ms: Date.now() - trace.started,
+      });
     }
 
     if (!abort.signal.aborted && (replyText.trim() || proposals.length)) {
@@ -351,6 +388,41 @@ export class AssistantService {
             `Transcript not saved: ${err instanceof Error ? err.message : err}`
           )
         );
+    }
+  }
+
+  private async precedentsResult(
+    toolUseId: string,
+    form: Record<string, unknown>,
+    trace: { precedentRefs: string[] }
+  ): Promise<Anthropic.Beta.BetaToolResultBlockParam> {
+    try {
+      const result = await this.precedents.forIssuer(
+        knownSimilarityFields(form)
+      );
+      trace.precedentRefs.push(...result.cases.map((c) => c.ref));
+      const note =
+        result.basis.length === 0
+          ? "The form has none of the fields the search uses yet. Ask the issuer for the asset type, country and offering details first."
+          : result.cases.length === 0
+            ? "No decided case matches the known fields. Say there is no comparable precedent yet; do not infer an outcome."
+            : "Precedents are earlier human decisions, not law and not a prediction. Cite refs, say what matched and what differs.";
+      return {
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: JSON.stringify({ ...result, note }),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `Precedent search failed: ${err instanceof Error ? err.message : err}`
+      );
+      return {
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        is_error: true,
+        content:
+          "Precedent search is unavailable right now. Tell the issuer you could not check past decisions.",
+      };
     }
   }
 

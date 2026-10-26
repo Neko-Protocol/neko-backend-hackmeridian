@@ -1,0 +1,27 @@
+# Neko backend (HackMeridian fork)
+
+> NestJS API for Neko's HackMeridian 2026 tokenization project on Stellar testnet: issuer accounts and KYB/KYC, tokenization applications with human review, an AI assistant grounded in a legal knowledge base and in anonymised past decisions, vault launches through a Soroban factory, and on-chain investor identity for Neko Pro. This is a fork of Neko's existing backend; the hackathon work is the diff from tag `pre-hackmeridian` to `main`.
+
+This file is a map, not evidence. Verify claims against the code at the commit you review. The canonical project entry point, live sites and evidence are in the main repository.
+
+## Start here
+
+- [Project README (main repo)](https://github.com/Neko-Protocol/neko-tokenization-hackmeridian/blob/main/README.md): product, live sites, repository boundaries.
+- [Evidence pack](https://github.com/Neko-Protocol/neko-tokenization-hackmeridian/blob/main/docs/evidence.md): versions, testnet transaction hashes, before and after table, test results and limits.
+- [This README](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/README.md): entry points, assistant evidence rules, commands and known test debt.
+- [Agent guide](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/AGENTS.md): how to work in this repository.
+
+## Code
+
+- [Launchpad domain](https://github.com/Neko-Protocol/neko-backend-hackmeridian/tree/main/src/domains/launchpad): everything built at the event.
+- [Assistant service](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/assistant/assistant.service.ts): streaming chat, tools (`propose_field_values`, `find_precedents`, `kb_*`), turn trace, review summary.
+- [Assistant prompt](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/assistant/assistant.prompt.ts): money flow through the vault, citation and abstention rules.
+- [Precedents service](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/precedents.service.ts): one search, two permission levels (admin full view, issuer anonymised view).
+- [Precedents tests](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/precedents.spec.ts): privacy of the issuer view, unknown fields, abstention, failure reporting, prompt rules.
+- [On-chain identity](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/chain/onchain-identity.service.ts): identity contract, KYC and AML claims, registry entry.
+- [Launch service](https://github.com/Neko-Protocol/neko-backend-hackmeridian/blob/main/src/domains/launchpad/chain/launch.service.ts): token, compliance and vault through the factory.
+
+## Related repositories
+
+- [neko-tokenization-hackmeridian](https://github.com/Neko-Protocol/neko-tokenization-hackmeridian): Launchpad, admin, contracts, Legal KB.
+- [neko-web-hackmeridian](https://github.com/Neko-Protocol/neko-web-hackmeridian): Neko Pro investor app and Supabase migrations.

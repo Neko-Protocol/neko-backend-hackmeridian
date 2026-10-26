@@ -24,6 +24,7 @@ import { DiditWebhookController } from "./didit-webhook.controller";
 import { InvestorsController } from "./investors.controller";
 import { InvestorsService } from "./investors.service";
 import { LaunchpadController } from "./launchpad.controller";
+import { PrecedentsService } from "./precedents.service";
 import { ProIdentityService } from "./pro-identity.service";
 import { VerificationsService } from "./verifications.service";
 
@@ -45,6 +46,7 @@ import { VerificationsService } from "./verifications.service";
     InvestorsService,
     ProIdentityService,
     ApplicationsService,
+    PrecedentsService,
     AssistantService,
     AssistantStorageService,
     RagClient,

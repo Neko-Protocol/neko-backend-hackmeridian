@@ -53,3 +53,7 @@ The database is Supabase. Migrations live in [neko-web-hackmeridian/supabase/mig
 - The precedent search uses fixed weights over seven fields. It does not learn, predict approval or replace the reviewer.
 - Pre-existing fork gaps, not introduced at the event: `npm run lint` has no ESLint config in this fork (it lived in the original monorepo). The full `npx jest` suite and Launchpad tests pass as of 26 October 2026.
 - No CI workflow or root license in this repository yet (pending a decision).
+
+## License
+
+MIT, see [LICENSE](LICENSE).

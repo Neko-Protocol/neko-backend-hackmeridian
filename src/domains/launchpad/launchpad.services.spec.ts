@@ -108,6 +108,7 @@ const BASE_ENV = {
   DIDIT_KYC_WORKFLOW_ID: "11111111-1111-1111-1111-111111111111",
   LAUNCHPAD_APP_URL: "http://localhost:3000",
   KYC_MOCK_ENABLED: "true",
+  REVIEW_SKIP_ENABLED: "true",
 };
 
 function setup(env: Record<string, string> = BASE_ENV) {
@@ -157,7 +158,12 @@ function setup(env: Record<string, string> = BASE_ENV) {
       .fn()
       .mockResolvedValue("Private raise for a coffee harvest."),
   } as unknown as jest.Mocked<AssistantService>;
-  const applications = new ApplicationsService(db.service, accounts, assistant);
+  const applications = new ApplicationsService(
+    db.service,
+    accounts,
+    assistant,
+    config(env)
+  );
   const onchainIdentity = {
     register: jest.fn().mockResolvedValue("CIDENTITY"),
   } as unknown as jest.Mocked<OnchainIdentityService>;
@@ -642,6 +648,43 @@ describe("ApplicationsService", () => {
     expect(view.account_id).toBe(created.account.id);
     expect(view.target_amount).toBe(250000);
     expect(db.tables.launchpad_applications).toHaveLength(1);
+    expect(db.tables.launchpad_applications[0].status).toBe("submitted");
+  });
+
+  it("approves a submitted application when the issuer skips pre-approval", async () => {
+    const { verifications, accounts, applications, db } = setup();
+    const started = await verifications.startMock("kyc", "Demo Judge");
+    await accounts.create(
+      started.verification.id,
+      started.claim_token,
+      "ana@x.com"
+    );
+
+    const created = await applications.create("token", SAMPLE_APPLICATION);
+    const view = await applications.skipReview("token", created.id);
+    expect(view.status).toBe("approved");
+    expect(view.reviewed_at).not.toBeNull();
+    expect(db.tables.launchpad_applications[0].reviewed_by).toBe("demo");
+  });
+
+  it("refuses to skip pre-approval unless REVIEW_SKIP_ENABLED=true", async () => {
+    const { verifications, accounts, applications, db } = setup({
+      ...BASE_ENV,
+      REVIEW_SKIP_ENABLED: "",
+    });
+    const started = await verifications.startMock("kyc", "Demo Judge");
+    await accounts.create(
+      started.verification.id,
+      started.claim_token,
+      "ana@x.com"
+    );
+
+    const created = await applications.create("token", SAMPLE_APPLICATION);
+    await expect(
+      applications.skipReview("token", created.id)
+    ).rejects.toMatchObject({
+      response: { code: "REVIEW_SKIP_DISABLED" },
+    });
     expect(db.tables.launchpad_applications[0].status).toBe("submitted");
   });
 

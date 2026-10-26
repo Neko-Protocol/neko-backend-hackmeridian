@@ -150,6 +150,21 @@ export class ApplicationsController {
     return this.launches.launch(this.bearerToken(authorization), id, dto);
   }
 
+  @Post(":id/skip-review")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Demo only: approve your own submitted application without review (REVIEW_SKIP_ENABLED).",
+  })
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  skipReview(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Headers("authorization") authorization?: string
+  ): Promise<ApplicationView> {
+    return this.applications.skipReview(this.bearerToken(authorization), id);
+  }
+
   @Get("mine")
   @ApiOperation({ summary: "List applications for the logged-in issuer." })
   @ApiBearerAuth()

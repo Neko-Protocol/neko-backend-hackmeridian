@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ErrorCode } from "@neko-protocol/api-contracts";
 import { SupabaseService } from "@core/supabase/supabase.service";
 import { AccountsService } from "./accounts.service";
@@ -69,8 +71,14 @@ export class ApplicationsService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly accounts: AccountsService,
-    private readonly assistant: AssistantService
+    private readonly assistant: AssistantService,
+    private readonly config: ConfigService
   ) {}
+
+  /** Demo only: lets the issuer approve their own application after submitting. */
+  isReviewSkipEnabled(): boolean {
+    return this.config.get<string>("REVIEW_SKIP_ENABLED")?.trim() === "true";
+  }
 
   async create(
     accessToken: string,
@@ -164,6 +172,47 @@ export class ApplicationsService {
         });
       }
     })();
+  }
+
+  /** Demo only (REVIEW_SKIP_ENABLED): approves the issuer's own pending application. */
+  async skipReview(accessToken: string, id: string): Promise<ApplicationView> {
+    if (!this.isReviewSkipEnabled()) {
+      throw new ForbiddenException({
+        code: LaunchpadErrorCode.REVIEW_SKIP_DISABLED,
+      });
+    }
+    const account = await this.accounts.getByAccessToken(accessToken);
+    const { data: existing, error: lookupErr } = await this.supabase.client
+      .from("launchpad_applications")
+      .select(WITH_DEPLOYMENT)
+      .eq("id", id)
+      .eq("account_id", account.account.id)
+      .maybeSingle();
+    if (lookupErr) throw this.dbError("application_skip_lookup", lookupErr);
+    if (!existing) {
+      throw new NotFoundException({
+        code: LaunchpadErrorCode.APPLICATION_NOT_FOUND,
+      });
+    }
+    if (!REVIEWABLE.has((existing as ApplicationRow).status)) {
+      throw new ConflictException({
+        code: LaunchpadErrorCode.APPLICATION_NOT_REVIEWABLE,
+      });
+    }
+
+    const { data, error } = await this.supabase.client
+      .from("launchpad_applications")
+      .update({
+        status: "approved",
+        review_note: "Demo: pre-approval skipped by the issuer.",
+        reviewed_by: "demo",
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select(WITH_DEPLOYMENT)
+      .single();
+    if (error || !data) throw this.dbError("application_skip_update", error);
+    return toApplicationView(data as ApplicationRow);
   }
 
   async listMine(accessToken: string): Promise<ApplicationView[]> {

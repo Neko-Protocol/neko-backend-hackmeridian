@@ -1,3 +1,4 @@
+import type { ConfigService } from "@nestjs/config";
 import type { SupabaseService } from "@core/supabase/supabase.service";
 import type { AccountsService } from "./accounts.service";
 import { ApplicationsService } from "./applications.service";
@@ -87,7 +88,8 @@ function setup(
   const service = new ApplicationsService(
     supabase,
     {} as AccountsService,
-    {} as AssistantService
+    {} as AssistantService,
+    {} as ConfigService
   );
   return { service, from };
 }

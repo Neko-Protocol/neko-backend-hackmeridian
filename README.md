@@ -31,6 +31,8 @@ Routes are versioned under `/v1` (for example `/v1/launchpad/applications`). Swa
 - Each turn logs `launchpad_assistant_turn` with the tools called, precedent refs returned, model, Legal KB availability and latency, without form values or text.
 - After submission, the backend writes `ai_summary` with Claude from the application and the conversation. The admin labels it as AI-generated and not verified.
 
+Deterministic behaviour checks for the assistant live in `src/domains/launchpad/assistant/eval/` (20 scenarios, mixed Spanish and English). With a scripted model they assert tool trace, Legal KB unavailability handling, permission boundaries, prompt-injection handling and citation validation; a live model run is the next step.
+
 ## Run it
 
 ```bash
@@ -39,7 +41,8 @@ export GITHUB_PACKAGES_TOKEN=  # read:packages, for the @neko-protocol/* package
 npm ci
 npm run dev                    # http://localhost:4000, Swagger at /docs
 npm run build
-npx jest src/domains/launchpad # hackathon tests
+npx jest                       # full suite (55 suites, 568 tests)
+npx jest src/domains/launchpad # Launchpad and assistant eval (8 suites, 143 tests)
 ```
 
 The database is Supabase. Migrations live in [neko-web-hackmeridian/supabase/migrations](https://github.com/Neko-Protocol/neko-web-hackmeridian/tree/main/supabase/migrations); the Launchpad needs `0029` to `0033`. Hosting steps are in the [deploy guide](https://github.com/Neko-Protocol/neko-tokenization-hackmeridian/blob/main/docs/deploy.md).
@@ -48,5 +51,5 @@ The database is Supabase. Migrations live in [neko-web-hackmeridian/supabase/mig
 
 - Testnet only. The manager key signs launches and identity registration; keys live in environment variables, never in the repository.
 - The precedent search uses fixed weights over seven fields. It does not learn, predict approval or replace the reviewer.
-- Pre-existing test debt from the fork, not introduced at the event: suites for CORS text, mailing (expects a sibling `web-app/supabase/migrations` folder), vault APY (Blend types) and pool rates (ESM loading) fail or do not load. `npm run lint` has no ESLint config in this fork (it lived in the original monorepo).
-- No CI workflow in this repository yet.
+- Pre-existing fork gaps, not introduced at the event: `npm run lint` has no ESLint config in this fork (it lived in the original monorepo). The full `npx jest` suite and Launchpad tests pass as of 26 October 2026.
+- No CI workflow or root license in this repository yet (pending a decision).

@@ -4,6 +4,7 @@ import type { AccountsService } from "./accounts.service";
 import { ApplicationsService } from "./applications.service";
 import type { AssistantService } from "./assistant/assistant.service";
 import type { ApplicationRow } from "./launchpad.types";
+import { PrecedentsService } from "./precedents.service";
 
 const TARGET: ApplicationRow = {
   id: "target",
@@ -15,6 +16,7 @@ const TARGET: ApplicationRow = {
   asset_type: "agriculture",
   description: "Test proposal",
   target_amount: "1000.00",
+  min_target: null,
   currency: "USD",
   min_ticket: 100,
   expected_yield_pct: null,
@@ -89,7 +91,8 @@ function setup(
     supabase,
     {} as AccountsService,
     {} as AssistantService,
-    {} as ConfigService
+    {} as ConfigService,
+    new PrecedentsService(supabase)
   );
   return { service, from };
 }

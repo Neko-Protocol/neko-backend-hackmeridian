@@ -9,9 +9,10 @@ export function parseCorsOrigins(raw: string | undefined | null): string[] {
   const value = (raw ?? "").trim();
   if (!value) return [];
 
-  const entries = value.startsWith("[")
-    ? parseJsonArray(value)
-    : value.split(",");
+  const entries =
+    value.startsWith("[") || value.startsWith("{")
+      ? parseJsonArray(value)
+      : value.split(",");
 
   const origins = entries
     .map((entry) => entry.trim())

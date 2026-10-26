@@ -9,6 +9,7 @@ import { fundWithFriendbot } from "@shared/stellar/friendbot";
 import { AccountsService } from "./accounts.service";
 import { ApplicationsService } from "./applications.service";
 import { InvestorsService } from "./investors.service";
+import { PrecedentsService } from "./precedents.service";
 import type { ProIdentityService } from "./pro-identity.service";
 import type { AssistantService } from "./assistant/assistant.service";
 import type { OnchainIdentityService } from "./chain/onchain-identity.service";
@@ -162,7 +163,8 @@ function setup(env: Record<string, string> = BASE_ENV) {
     db.service,
     accounts,
     assistant,
-    config(env)
+    config(env),
+    new PrecedentsService(db.service)
   );
   const onchainIdentity = {
     register: jest.fn().mockResolvedValue("CIDENTITY"),

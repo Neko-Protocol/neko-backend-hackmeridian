@@ -4,7 +4,7 @@ jest.mock("@neko-protocol/keeper", () => ({
   getCurrentNetworkId: () => "PUBLIC",
 }));
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigService } from "@nestjs/config";
 import { SupabaseService } from "@core/supabase/supabase.service";
@@ -14,23 +14,37 @@ import { AdminWalletBalanceService } from "../triggers/admin-wallet-balance.serv
 import { MAILING_SENDS_CONFLICT_TARGET } from "../mailing-sends.constants";
 import { MailingEnrollmentService } from "./mailing-enrollment.service";
 
-const MIGRATIONS_DIR = join(
-  __dirname,
-  "../../../../../../web-app/supabase/migrations"
-);
+const SIBLING_REPO_ROOT = join(__dirname, "../../../../../../");
+const WEB_REPO_CANDIDATES = [
+  "web-app",
+  "neko-web-hackmeridian",
+  "neko-mainnet",
+] as const;
+
+function resolveMigrationsDir(): string | null {
+  const fromEnv = process.env.NEKO_WEB_MIGRATIONS_DIR?.trim();
+  if (fromEnv) {
+    return existsSync(fromEnv) ? fromEnv : null;
+  }
+  for (const repo of WEB_REPO_CANDIDATES) {
+    const dir = join(SIBLING_REPO_ROOT, repo, "supabase", "migrations");
+    if (existsSync(dir)) return dir;
+  }
+  return null;
+}
 
 const WALLET = "GDEPOSITOR";
 const AUTOMATION_ID = "11111111-1111-1111-1111-111111111111";
 const DEPOSITED_AT = "2026-09-14T10:00:00.000Z";
 
-function constraintFromMigrations(): string {
-  const files = readdirSync(MIGRATIONS_DIR)
+function constraintFromMigrations(migrationsDir: string): string {
+  const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
   let columns: string | null = null;
   for (const file of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+    const sql = readFileSync(join(migrationsDir, file), "utf8");
     const table =
       /create table (?:if not exists )?public\.mailing_sends\b[\s\S]*?\n\);/i.exec(
         sql
@@ -156,68 +170,76 @@ function build(calls: UpsertCall[], constraint: string, floor?: string) {
   );
 }
 
-describe("MailingEnrollmentService", () => {
-  const constraint = constraintFromMigrations();
+const migrationsDir = resolveMigrationsDir();
+const describeMailingEnrollment = migrationsDir ? describe : describe.skip;
 
-  it("targets the unique key the migrations actually declare", () => {
-    expect(MAILING_SENDS_CONFLICT_TARGET).toBe(constraint);
-  });
+describeMailingEnrollment(
+  migrationsDir
+    ? "MailingEnrollmentService"
+    : "MailingEnrollmentService — skipped: investor web repo is not checked out (no supabase/migrations)",
+  () => {
+    const constraint = constraintFromMigrations(migrationsDir!);
 
-  it("enqueues a verified depositor instead of failing on ON CONFLICT", async () => {
-    const calls: UpsertCall[] = [];
-    const result = await build(calls, constraint).run();
-
-    expect(result).toEqual({ automationsProcessed: 1, enrolled: 1 });
-    expect(calls).toHaveLength(1);
-    expect(calls[0].onConflict).toBe(constraint);
-    expect(calls[0].rows[0]).toMatchObject({
-      message_id: AUTOMATION_ID,
-      wallet_address: WALLET,
-      email: "depositor@test.io",
-      trigger_at: DEPOSITED_AT,
-      scheduled_send_at: DEPOSITED_AT,
-      status: "pending",
+    it("targets the unique key the migrations actually declare", () => {
+      expect(MAILING_SENDS_CONFLICT_TARGET).toBe(constraint);
     });
-  });
 
-  it("skips a candidate whose event predates the enrollment floor", async () => {
-    const calls: UpsertCall[] = [];
-    // The deposit is 2026-09-14; the floor is the day after.
-    const result = await build(
-      calls,
-      constraint,
-      "2026-09-15T00:00:00.000Z"
-    ).run();
+    it("enqueues a verified depositor instead of failing on ON CONFLICT", async () => {
+      const calls: UpsertCall[] = [];
+      const result = await build(calls, constraint).run();
 
-    expect(result).toEqual({ automationsProcessed: 1, enrolled: 0 });
-    expect(calls).toHaveLength(0);
-  });
+      expect(result).toEqual({ automationsProcessed: 1, enrolled: 1 });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].onConflict).toBe(constraint);
+      expect(calls[0].rows[0]).toMatchObject({
+        message_id: AUTOMATION_ID,
+        wallet_address: WALLET,
+        email: "depositor@test.io",
+        trigger_at: DEPOSITED_AT,
+        scheduled_send_at: DEPOSITED_AT,
+        status: "pending",
+      });
+    });
 
-  it("enrolls a candidate whose event is at or after the floor", async () => {
-    const calls: UpsertCall[] = [];
-    const result = await build(
-      calls,
-      constraint,
-      "2026-09-01T00:00:00.000Z"
-    ).run();
+    it("skips a candidate whose event predates the enrollment floor", async () => {
+      const calls: UpsertCall[] = [];
+      // The deposit is 2026-09-14; the floor is the day after.
+      const result = await build(
+        calls,
+        constraint,
+        "2026-09-15T00:00:00.000Z"
+      ).run();
 
-    expect(result).toEqual({ automationsProcessed: 1, enrolled: 1 });
-    expect(calls[0].rows[0]).toMatchObject({ trigger_at: DEPOSITED_AT });
-  });
+      expect(result).toEqual({ automationsProcessed: 1, enrolled: 0 });
+      expect(calls).toHaveLength(0);
+    });
 
-  it("refuses to start on an unparseable floor rather than enroll all history", () => {
-    expect(() => build([], constraint, "not-a-date")).toThrow(
-      /MAILING_ENROLLMENT_FLOOR/
-    );
-  });
+    it("enrolls a candidate whose event is at or after the floor", async () => {
+      const calls: UpsertCall[] = [];
+      const result = await build(
+        calls,
+        constraint,
+        "2026-09-01T00:00:00.000Z"
+      ).run();
 
-  it("writes nothing when the conflict target is stale", async () => {
-    const calls: UpsertCall[] = [];
-    const result = await build(
-      calls,
-      "message_id,email,trigger_at,network"
-    ).run();
+      expect(result).toEqual({ automationsProcessed: 1, enrolled: 1 });
+      expect(calls[0].rows[0]).toMatchObject({ trigger_at: DEPOSITED_AT });
+    });
 
-    expect(result).toEqual({ automationsProcessed: 0, enrolled: 0 });
-  });
-});
+    it("refuses to start on an unparseable floor rather than enroll all history", () => {
+      expect(() => build([], constraint, "not-a-date")).toThrow(
+        /MAILING_ENROLLMENT_FLOOR/
+      );
+    });
+
+    it("writes nothing when the conflict target is stale", async () => {
+      const calls: UpsertCall[] = [];
+      const result = await build(
+        calls,
+        "message_id,email,trigger_at,network"
+      ).run();
+
+      expect(result).toEqual({ automationsProcessed: 0, enrolled: 0 });
+    });
+  }
+);

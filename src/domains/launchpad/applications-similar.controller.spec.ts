@@ -4,6 +4,7 @@ import request from "supertest";
 import { AdminAuthService } from "../platform/admin-auth/admin-auth.service";
 import { AdminApplicationsController } from "./applications.controller";
 import { ApplicationsService } from "./applications.service";
+import { VaultOpsService } from "./chain/vault-ops.service";
 
 const APPLICATION_ID = "11111111-1111-4111-8111-111111111111";
 const ENDPOINT = `/v1/launchpad/admin/applications/${APPLICATION_ID}/similar`;
@@ -23,6 +24,7 @@ describe("GET admin applications/:id/similar", () => {
       providers: [
         { provide: ApplicationsService, useValue: { adminSimilar } },
         { provide: AdminAuthService, useValue: { verifyAdminToken } },
+        { provide: VaultOpsService, useValue: {} },
       ],
     }).compile();
     app = module.createNestApplication();
